@@ -14,6 +14,30 @@ api_dir := ../api
 # set NODE_ENV for a command with $(env)=environment
 env := cross-env NODE_ENV
 
+# cross-platform noop command
+noop := cd .
+
+# build and publish options
+mainline_branches := master edge
+feature_branch := $(filter-out $(mainline_branches),$(OT_BRANCH))
+
+dist_files := "dist/**/Opentrons-v*"
+update_files := "dist/@(alpha|beta|latest)*.@(yml|json)"
+publish_dir := dist/publish
+
+# build suffix to add to artifacts
+# if branch is master or edge -> b$(CI_BUILD_NUMBER)
+# if branch is something else -> b$(CI_BUILD_NUMBER)-$(BRANCH_NAME)
+# else -> dev
+branch_suffix := $(and $(feature_branch),-$(feature_branch))
+build := $(or $(and $(OT_BUILD),b$(OT_BUILD)$(branch_suffix)),dev)
+publish_update := $(strip $(OT_TAG))
+
+builder := $(env)=production BUILD=$(build) electron-builder \
+	--publish=never \
+	-c.publish.bucket=$(OT_BUCKET_APP) \
+	-c.publish.path=$(OT_FOLDER_APP)
+
 # standard targets
 #####################################################################
 
@@ -44,32 +68,37 @@ package-deps: clean ui api
 
 .PHONY: package
 package: package-deps
-	electron-builder --dir
+	$(builder) --dir
 
 .PHONY: dist-posix
 dist-posix: package-deps
-	electron-builder --linux --mac --publish never
+	$(builder) --linux --mac
 	$(MAKE) _dist-collect-artifacts
 
 .PHONY: dist-osx
 dist-osx: package-deps
-	electron-builder --mac --publish never
+	$(builder) --mac
 	$(MAKE) _dist-collect-artifacts
 
 .PHONY: dist-linux
 dist-linux: package-deps
-	electron-builder --linux --publish never
+	$(builder) --linux
 	$(MAKE) _dist-collect-artifacts
 
 .PHONY: dist-win
 dist-win: package-deps
-	electron-builder --win --x64 --publish never
+	$(builder) --win --x64
 	$(MAKE) _dist-collect-artifacts
 
 # copy distributable artifacts to the publish directory
+# update files will not exist for all OSs, so noop if cp errors
 .PHONY: _dist-collect-artifacts
 _dist-collect-artifacts:
-	shx mkdir -p dist/publish && shx cp dist/**/opentrons-v* dist/publish
+	echo $(OT_TAG)
+	echo $(publish_update)
+	shx mkdir -p dist/publish
+	shx cp $(dist_files) $(publish_dir)
+	$(and $(publish_update),shx cp $(update_files) $(publish_dir) || $(noop))
 
 # development
 #####################################################################
